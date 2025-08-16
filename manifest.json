@@ -1,0 +1,9 @@
+{
+  "id": "system-c2",
+  "name": "System C2 Obsidian Plugin",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "main": "main.js",
+  "author": "c2vi",
+  "description": "Integrates Obsidian into the System C2 workflow"
+}

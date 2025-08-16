@@ -1,0 +1,7 @@
+
+if [[ "$1" == "o" ]] || [[ "$1" == "obsidian" ]]
+then
+	npm run build
+	mkdir -p ~/work/things/.obsidian/plugins/system-c2
+	cp ./main.js ./manifest.json ~/work/things/.obsidian/plugins/system-c2
+fi
