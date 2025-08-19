@@ -1,0 +1,25 @@
+{
+	"name": "system-c2-obsidian-plugin",
+	"version": "0.1.0",
+	"description": "Integrates Obsidian into the System C2 workflow",
+	"main": "main.js",
+	"scripts": {
+		"build": "node esbuild.config.mjs production",
+		"dev": ""
+	},
+	"keywords": [
+		"obsidian",
+		"plugin"
+	],
+	"author": "c2vi",
+	"license": "MIT",
+	"dependencies": {
+	},
+	"devDependencies": {
+		"builtin-modules": "3.3.0",
+		"obsidian": "latest",
+		"esbuild": "^0.21.0",
+		"tslib": "^2.6.2",
+		"typescript": "^5.5.4"
+	}
+}

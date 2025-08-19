@@ -1,5 +1,6 @@
 
 import { Plugin, TFile, Vault, MetadataCache } from "obsidian";
+import { AppReactView } from "./AppReactView.tsx";
 
 export default class SystemC2Plugin extends Plugin {
 	async onload() {
@@ -9,6 +10,20 @@ export default class SystemC2Plugin extends Plugin {
 				this.handleFileUpdate(file);
 			})
 		);
+
+		this.registerView(
+			"system-c2-app",
+			(leaf) => new AppReactView(leaf)
+		);
+
+		this.addCommand({
+			id: "open-test-view",
+			name: "Open Test View",
+			callback: () => {
+				console.log("opening test view.........")
+				this.activateView();
+			},
+		});
 	}
 
 	async handleFileUpdate(file: TFile) {
@@ -32,6 +47,19 @@ export default class SystemC2Plugin extends Plugin {
 		if (hasTag && !isRrootOtask) {
 			console.log("modified a otask note")
 		}
+	}
+
+	async activateView() {
+		const leaf = this.app.workspace.getLeaf(true);
+		await leaf.setViewState({
+			type: "system-c2-app",
+			active: true,
+		});
+		this.app.workspace.revealLeaf(leaf);
+	}
+
+	onunload() {
+		this.app.workspace.detachLeavesOfType(MY_VIEW_TYPE);
 	}
 }
 
