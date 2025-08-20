@@ -56,30 +56,3 @@ function Dashboard() {
   return <div>Signed in as: {user.email}</div>;
 }
 
-
-function Login() {
-  const [nonce] = useState(crypto.randomUUID());
-
-  return (
-    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-      <GoogleLogin
-        nonce={nonce}
-        onError={() => alert('Login failed')}
-        onSuccess={({ credential }) => {
-          db.auth
-            .signInWithIdToken({
-              clientName: GOOGLE_CLIENT_NAME,
-              idToken: credential,
-              // Make sure this is the same nonce you passed as a prop
-              // to the GoogleLogin button
-              nonce,
-            })
-            .catch((err) => {
-              alert('Uh oh: ' + err.body?.message);
-            });
-        }}
-      />
-    </GoogleOAuthProvider>
-  );
-}
-

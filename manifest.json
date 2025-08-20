@@ -5,5 +5,6 @@
   "minAppVersion": "1.5.0",
   "main": "main.js",
   "author": "c2vi",
+  "isDesktopOnly": true,
   "description": "Integrates Obsidian into the System C2 workflow"
 }
