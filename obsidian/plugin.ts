@@ -96,6 +96,31 @@ export default class SystemC2Plugin extends Plugin {
 	}
 }
 
+let OTASK_PARSE_QUEUE = [];
+
+let OTASK_LIST = [];
+
+let DBG = false
+
+function dbg() {
+	if (DBG) {
+		console.log(arguments)
+	}
+
+}
+
+function queue_otasks_from_list_item(listItem, otask_path, priority = 0) {
+	OTASK_PARSE_QUEUE.push({
+		listItem, otask_path, priority
+	})
+}
+
+function queue_otasks_from_file(file, otask_path, priority = 0) {
+	OTASK_PARSE_QUEUE.push({
+		file, otask_path, priority
+	})
+}
+
 
 // parsing helper functions
 
@@ -107,14 +132,29 @@ async function full_parse(db) {
 	const list = await getListUnderHeading(content, "root");
 
 	for (const entry of list) {
-		otasks = otasks.concat(await otasks_from_list_item(entry, []))
+		queue_otasks_from_list_item(entry, [])
 	}
 
-	console.log("otasks::", otasks)
+	// go through the queue of otaskParseTasks
+	// using a queue instead of recursive calls, to make it more debuggable...
+	do {
+		const task = OTASK_PARSE_QUEUE.shift()
+		dbg("task", task)
+		if (task.file) {
+			const otask = await otasks_from_file(task.file, task.otask_path, task.priority)
+			dbg("otask", otask)
+			if (otask) {OTASK_LIST.push(otask)}
+		} else {
+			const otask = await otasks_from_list_item(task.listItem, task.otask_path, task.priority)
+			dbg("otask", otask)
+			if (otask) {OTASK_LIST.push(otask)}
+		}
+	} while (OTASK_PARSE_QUEUE.length > 0)
+
+	dbg("otasks::", OTASK_LIST)
 }
 
 async function otasks_from_list_item(listItem, otask_path, priority = 0) {
-	let otasks = [];
 
 	// the main otask this listItem is about
 	let otask = {
@@ -123,30 +163,29 @@ async function otasks_from_list_item(listItem, otask_path, priority = 0) {
 		path: [],
 		priority,
 	};
-	console.log("SystemC2: otasks_from_list_item", listItem, otask_path)
+	dbg("SystemC2: otasks_from_list_item", listItem, otask_path)
 
 	if (!listItem.children[0].type === "paragraph") {
-		console.log("listItem[0] of a otask item is not a paragraph... the otask:", listItem)
-		return otasks
+		dbg("listItem[0] of a otask item is not a paragraph... the otask:", listItem)
+		return null
 	}
 	let longName = nodeToString(listItem.children[0])
 
-	console.log("SystemC2: otasks_from_list_item longName:", longName)
+	dbg("longName:", longName)
 
 
 	// check for [[anotherotask]], call otasks_from_file, return those
 	const match = longName.match(/\[\[([^\]]+)\]\]/);
 	if (match) {
-		console.log("file: hereeeeeeeeeeeeee")
 		const file = app.metadataCache.getFirstLinkpathDest(match[1], "");
 		if (file) {
 			const metadata = app.metadataCache.getFileCache(file);
 
 			if (metadata?.frontmatter?.tags?.includes("t/otask")) {
-				otasks = otasks.concat(await otasks_from_file(file, otask_path))
-				return otasks;
+				queue_otasks_from_file(file, otask_path)
+				return null;
 			} else {
-				console.log("SystemC2: listItem with Link to '", match[1] , "', which is not an otask", longName)
+				dbg("SystemC2: listItem with Link to '", match[1] , "', which is not an otask", longName)
 			}
 		}
 	}
@@ -165,7 +204,6 @@ async function otasks_from_list_item(listItem, otask_path, priority = 0) {
 	otask.short = longName
 	otask.path = otask_path
 	let new_otask_path = [... otask_path, otask.short]
-	otasks.push(otask)
 
 	// go through sub list items
 	// 	- if it's a prop for the otask... handle that
@@ -175,14 +213,14 @@ async function otasks_from_list_item(listItem, otask_path, priority = 0) {
 	// 	- if it's a link to a otask file... handle as another otask -> call otasks_from_file()
 	// 	- else add it as description item list to otask
 	if (!listItem.children || listItem.children.length < 2) {
-		return otasks;
+		return otask;
 	}
 	for (const subListItem of listItem.children[1].children){
 
 		let text = nodeToString(subListItem.children[0])
 
 		// check prop
-		if (check_otask_prop_from_text(text, otask)) {
+		if (check_otask_prop_from_list_item(subListItem, otask)) {
 			new_otask_path = [... otask_path, otask.short] // have to redo it here, in case short changed from aprop
 			continue; // don't do any other processing on this sub-listItem
 		}
@@ -201,14 +239,14 @@ async function otasks_from_list_item(listItem, otask_path, priority = 0) {
 
 		// check ot
 		if (text.startsWith("ot:")) {
-			otasks = otasks.concat(await otasks_from_list_item(subListItem, new_otask_path, otask.priority))
+			queue_otasks_from_list_item(subListItem, new_otask_path, otask.priority)
 
 			continue; // don't do any other processing on this sub-listItem
 		}
 
 		// check [ ]
 		if (text.startsWith("[ ] ") || text.startsWith("[x] ")) {
-			otasks = otasks.concat(await otasks_from_list_item(subListItem, new_otask_path, otask.priority))
+			queue_otasks_from_list_item(subListItem, new_otask_path, otask.priority)
 
 			continue; // don't do any other processing on this sub-listItem
 		}
@@ -221,10 +259,10 @@ async function otasks_from_list_item(listItem, otask_path, priority = 0) {
 				const metadata = app.metadataCache.getFileCache(file);
 
 				if (metadata?.frontmatter?.tags?.includes("t/otask")) {
-					otasks = otasks.concat(await otasks_from_file(file, new_otask_path, otask.priority))
+					queue_otasks_from_file(file, new_otask_path, otask.priority)
 					continue;
 				} else {
-					console.log("SystemC2: listItem with Link to '", match[1] , "', which is not an otask", longName)
+					dbg("SystemC2: listItem with Link to '", match[1] , "', which is not an otask", longName)
 				}
 
 				continue; // don't do any other processing on this sub-listItem
@@ -232,19 +270,17 @@ async function otasks_from_list_item(listItem, otask_path, priority = 0) {
 		}
 
 		// add as description
-		const desc = unified().use(remarkStringify).stringify(subListItem)
+		const desc = unified().use(remarkStringify, {bullet: "-"}).stringify(subListItem)
 		otask.description.push(desc)
 	}
 
-	return otasks;
+	return otask;
 }
 
 
 
 async function otasks_from_file(file: TFile, otask_path, priority = 0) {
-	console.log("SystemC2: otasks_from_file", file, otask_path)
-
-	let otasks = [];
+	dbg("SystemC2: otasks_from_file", file, otask_path)
 
 	// the main otask this file is about
 	let otask = {
@@ -267,7 +303,7 @@ async function otasks_from_file(file: TFile, otask_path, priority = 0) {
 		const text = nodeToString(topListItem)
 
 		// check for prop
-		if (check_otask_prop_from_text(text, otask)) {
+		if (check_otask_prop_from_list_item(topListItem, otask)) {
 			new_otask_path = [...otask_path, otask.short]
 			continue; // don't do any other processing on this sub-listItem
 		}
@@ -283,37 +319,56 @@ async function otasks_from_file(file: TFile, otask_path, priority = 0) {
 			listItems = listItems.concat(await getListUnderHeading(content, "sub"))
 		}
 
-		console.log(`sub section ${sub_number} has items:`, listItems)
+		//dbg(`sub section ${sub_number} has items:`, listItems)
 
 		for (const listItem of listItems) {
-			otasks = otasks.concat(await otasks_from_list_item(listItem, new_otask_path, otask.priority+sub_number))
+			// check if listItem is an action...
+			let text = nodeToString(listItem.children[0])
+			if (text.startsWith("ac:"){} || text.startsWith("[ ] ac:") || text.startsWith("[x] ac:") {
+				const action = action_from_list_item(listItem, otask_path)
+				otask.actions.push(action)
+			}
+
+			
+			queue_otasks_from_list_item(listItem, new_otask_path, otask.priority+sub_number)
 		}
 	}
 
-	otasks.push(otask)
-	return otasks;
+	return otask;
 }
 
 
 
 function action_from_list_item(listItem, otask_path) {
-	console.log("SystemC2: action_from_list_item", listItem, otask_path)
+	dbg("SystemC2: action_from_list_item", listItem, otask_path)
 	let action = {}
+	let text = nodeToString(listItem.children[0]).slice(4)
 
-	action.name = nodeToString(listItem.children[0]).slice(4)
+	if (text.startsWith("[")) {
+		text = text.slice(4)
+	}
+
+	action.name = text
 
 	return action
 }
 
 
 
-function check_otask_prop_from_text(text, otask) {
+function check_otask_prop_from_list_item(listItem, otask) {
+	let text = nodeToString(listItem.children[0])
+
 	for (const prop_name of OTASK_PROP_NAMES) {
 		if (text.startsWith(prop_name + ":")) {
 			const value = text.slice(prop_name.length + 2)
 
-			if (prop_name == "priority") {
+			if (prop_name == "priority") { // parse priority as int
 				otask[prop_name] = parseInt(value)
+
+			} else if (prop_name == "outcome") { // add sub items to it
+				let fullText = unified().use(remarkStringify, {bullet: "-"}).stringify(listItem).slice(prop_name.length + 4)
+				otask[prop_name] = fullText
+
 			} else {
 				otask[prop_name] = value
 			}
@@ -335,7 +390,7 @@ function nodeToString(node: any): string {
 
 async function getListUnderHeading(markdown: string, headingText: string): string[] {
 	const tree = unified().use(remarkParse).parse(markdown);
-	console.log("tree", tree)
+	//dbg("tree", tree)
 
 	let capture = false;
 	let items: string[] = [];
@@ -368,7 +423,7 @@ async function getListUnderHeading(markdown: string, headingText: string): strin
 }
 
 
-export function getListItemsBeforeFirstHeading(markdown: string) {
+function getListItemsBeforeFirstHeading(markdown: string) {
 	const tree = unified().use(remarkParse).use(remarkFrontmatter, ['yaml', 'toml']).parse(markdown);
 
 	let items = [];
