@@ -8,9 +8,13 @@ import { unified } from "unified";
 import { visit } from "unist-util-visit";
 import { Root, Content, Heading, List, ListItem, Text } from "mdast";
 import remarkFrontmatter from 'remark-frontmatter'
+import remarkGfm from 'remark-gfm'
+import wikiLinkPlugin from "@flowershow/remark-wiki-link";
 
 const OTASK_PROP_NAMES = ["short", "outcome", "priority"]
 const ACTION_PROP_NAMES = []
+
+const REMARK = unified().use(remarkParse).use(remarkFrontmatter).use(remarkGfm).use(remarkStringify, {bullet: "-"});
 
 export default class SystemC2Plugin extends Plugin {
 
@@ -54,7 +58,7 @@ export default class SystemC2Plugin extends Plugin {
 			},
 		});
 
-		full_parse(this.db)
+		//full_parse(this.db)
 	}
 
 	async handleFileUpdate(file: TFile) {
@@ -75,6 +79,7 @@ export default class SystemC2Plugin extends Plugin {
 		if (!this.isLoggedIn()) {
 			return;
 		}
+
 		const isRrootOtask = file.basename === "my-projects";
 
 		if (isRrootOtask) {
@@ -125,9 +130,11 @@ function queue_otasks_from_file(file, otask_path, priority = 0) {
 // parsing helper functions
 
 async function full_parse(db) {
+	console.log("full parse.......................... yay")
 	let otasks = [];
 
-	const root_file = app.vault.getAbstractFileByPath("private/my-projects.md");
+	const root_file = app.vault.getAbstractFileByPath("task/my-projects.md");
+
 	const content = await app.vault.read(root_file);
 	const list = await getListUnderHeading(content, "root");
 
@@ -151,8 +158,94 @@ async function full_parse(db) {
 		}
 	} while (OTASK_PARSE_QUEUE.length > 0)
 
-	dbg("otasks::", OTASK_LIST)
+	console.log("otasks::", OTASK_LIST)
+
+	render_sub0_file(OTASK_LIST)
 }
+
+async function render_sub0_file(otasks) {
+	const sub0_file = app.vault.getAbstractFileByPath("private/sub0-tasks.md");
+	if (!(sub0_file instanceof TFile)) {
+		console.error("SystemC2: sub0_file not found:", "private/sub0-tasks.md", sub0_file);
+		return;
+	}
+
+	//render sub0
+	const sub0_otasks = otasks.filter(otask => otask.priority == 0 && !otask.is_file);
+	console.log("sub0 otasks...", sub0_otasks)
+
+	let rendered_otasks_string = "";
+
+	for (const otask of sub0_otasks){
+		
+		const path_part = otask.path.length > 0 ? otask.path.join(": ") + ": " : ""
+
+		let content_part = otask.content ? otask.content + "\n" : "";
+		content_part = content_part.split("\n").map(line => "\t"+line).join("\n"); // add a \t in front of every otask.content line
+
+		rendered_otasks_string += `- ${path_part}${otask.longName}\n${content_part}\n`
+	}
+
+	await replaceHeading(sub0_file, "sub0", rendered_otasks_string)
+
+	//render sub-1
+}
+
+
+async function replaceHeading(file: TFile, heading: string, newContent: string) {
+  const data = await this.app.vault.read(file);
+
+  // Parse the Markdown into an AST
+  const tree = REMARK.parse(data) as Root;
+
+  // Split new content into AST nodes
+  const newContentAst = REMARK.parse(newContent) as Root;
+
+  const children = tree.children;
+  const newChildren: Content[] = [];
+  let insideTarget = false;
+  let targetLevel = 0;
+
+  for (let i = 0; i < children.length; i++) {
+    const node = children[i];
+
+    if (node.type === "heading") {
+      const headingNode = node as Heading;
+      const text = headingNode.children
+        .filter((c) => c.type === "text")
+        .map((c: any) => c.value)
+        .join("");
+
+      // If we encounter our target heading
+      if (text.trim() === heading) {
+        insideTarget = true;
+        targetLevel = headingNode.depth;
+        newChildren.push(node); // Keep the heading itself
+        // Insert new content right after
+        newChildren.push(...newContentAst.children);
+        continue;
+      }
+
+      // If we’re currently inside target section and see a heading of same or higher level
+      if (insideTarget && headingNode.depth <= targetLevel) {
+        insideTarget = false;
+      }
+    }
+
+    // If we’re not inside the target section, keep the node
+    if (!insideTarget) {
+      newChildren.push(node);
+    }
+  }
+
+  const newTree: Root = { ...tree, children: newChildren };
+
+  // Convert AST back to Markdown
+  const newMarkdown = await REMARK.stringify(newTree);
+
+  await this.app.vault.modify(file, newMarkdown);
+}
+
 
 async function otasks_from_list_item(listItem, otask_path, priority = 0) {
 
@@ -215,6 +308,16 @@ async function otasks_from_list_item(listItem, otask_path, priority = 0) {
 	if (!listItem.children || listItem.children.length < 2) {
 		return otask;
 	}
+
+	// add content as text to otask
+	if (otask.longName == "hosting updates") {
+		console.log("listItem... ", listItem.children[1])
+		let hii = REMARK.stringify(listItem.children[1]);
+		console.log("text...", hii)
+	}
+	let content_text = REMARK.stringify(listItem.children[1]);
+	otask.content = content_text;
+
 	for (const subListItem of listItem.children[1].children){
 
 		let text = nodeToString(subListItem.children[0])
@@ -270,7 +373,7 @@ async function otasks_from_list_item(listItem, otask_path, priority = 0) {
 		}
 
 		// add as description
-		const desc = unified().use(remarkStringify, {bullet: "-"}).stringify(subListItem)
+		const desc = REMARK.stringify(subListItem)
 		otask.description.push(desc)
 	}
 
@@ -288,6 +391,7 @@ async function otasks_from_file(file: TFile, otask_path, priority = 0) {
 		actions: [],
 		path: [],
 		priority,
+		is_file: true,
 	};
 
 	otask.longName = file.basename
@@ -324,7 +428,7 @@ async function otasks_from_file(file: TFile, otask_path, priority = 0) {
 		for (const listItem of listItems) {
 			// check if listItem is an action...
 			let text = nodeToString(listItem.children[0])
-			if (text.startsWith("ac:"){} || text.startsWith("[ ] ac:") || text.startsWith("[x] ac:") {
+			if (text.startsWith("ac:") || text.startsWith("[ ] ac:") || text.startsWith("[x] ac:")) {
 				const action = action_from_list_item(listItem, otask_path)
 				otask.actions.push(action)
 			}
@@ -366,7 +470,7 @@ function check_otask_prop_from_list_item(listItem, otask) {
 				otask[prop_name] = parseInt(value)
 
 			} else if (prop_name == "outcome") { // add sub items to it
-				let fullText = unified().use(remarkStringify, {bullet: "-"}).stringify(listItem).slice(prop_name.length + 4)
+				let fullText = REMARK.stringify(listItem).slice(prop_name.length + 4)
 				otask[prop_name] = fullText
 
 			} else {
@@ -389,7 +493,7 @@ function nodeToString(node: any): string {
 }
 
 async function getListUnderHeading(markdown: string, headingText: string): string[] {
-	const tree = unified().use(remarkParse).parse(markdown);
+	const tree = REMARK.parse(markdown);
 	//dbg("tree", tree)
 
 	let capture = false;
@@ -424,7 +528,7 @@ async function getListUnderHeading(markdown: string, headingText: string): strin
 
 
 function getListItemsBeforeFirstHeading(markdown: string) {
-	const tree = unified().use(remarkParse).use(remarkFrontmatter, ['yaml', 'toml']).parse(markdown);
+	const tree = REMARK.parse(markdown);
 
 	let items = [];
 
