@@ -27,6 +27,8 @@ enum Commands {
     /// Append to the action list
     #[command(alias = "aal")]
     AppendActionList,
+    #[command(alias = "buyh")]
+    ButHealingPotion,
 }
 
 #[derive(Serialize)]
@@ -43,6 +45,12 @@ fn main() {
     match cli.command {
         Commands::AppendActionList => {
             if let Err(err) = cmd_append_action_list() {
+                println!("err: {}", err);
+                exit(1);
+            }
+        }
+        Commands::ButHealingPotion => {
+            if let Err(err) = cmd_buy_healing_potion() {
                 println!("err: {}", err);
                 exit(1);
             }
@@ -132,5 +140,32 @@ pub fn cmd_append_action_list() -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn cmd_buy_healing_potion() -> anyhow::Result<()> {
+
+    // Load credentials from env variables
+    let home_dir = std::env::home_dir().ok_or(anyhow::Error::msg("could not get home_dir"))?;
+    let user_id = fs::read_to_string(home_dir.join("secrets").join("habitica-user-id"))?;
+    let api_token = fs::read_to_string(home_dir.join("secrets").join("habitica-api-token"))?;
+
+    let client = Client::new();
+
+    let res = client
+        .post("https://habitica.com/api/v3/user/buy-health-potion")
+        .header("x-api-user", &user_id)
+        .header("x-api-key", &api_token)
+        .header("x-client", format!("{}-SystemC2", user_id))
+        .send()?;
+
+	if res.status().is_success() {
+		let body = res.text()?;
+		println!("Potion bought successfully: {}", body);
+	} else {
+		let status = res.status();
+		let body = res.text()?;
+		eprintln!("Error {}: {}", status, body);
+	}
+
+    Ok(())
+}
 
 
